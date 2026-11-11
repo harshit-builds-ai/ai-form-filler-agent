@@ -29,7 +29,7 @@ A browser-console agent that fills multi-step job application forms (Workday, Su
 
 ## Limitations
 
-- Single 800-line file with no automated tests yet.
+- Single 800-line file. CI only runs a syntax check (`node --check`); there are no behavioural tests yet.
 - Some sites block calls to external APIs from the page.
 - Free-tier Gemini rate limits can slow long forms.
 - It answers legal and background declarations only from your PROFILE. Review every answer before you submit.

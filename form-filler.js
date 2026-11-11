@@ -129,7 +129,7 @@ Where I found the job / "How did you hear about us": LinkedIn
     while (Date.now() < end && !window.__aiStop) { setBar('⏳ ' + why + ' (' + Math.ceil((end - Date.now()) / 1000) + ' सेकंड)', stopBtn); await sleep(500); }
   };
   const nextModel = why => { if (gi < GMODELS.length - 1) { log('🔁 ' + GMODELS[gi] + ' छोड़कर ' + GMODELS[gi + 1] + ' पर जा रहा हूँ (' + why + ')'); gi++; SS.set('gmodel', String(gi)); return true; } return false; };
-  async function claude(system, user) {   // नाम वही रखा ताकि बाकी कोड न बदले; अंदर Gemini है
+  async function callGemini(system, user) {
     let json = true;
     for (let attempt = 1; attempt <= 8; attempt++) {
       if (window.__aiStop) return '{"thought":"stopped","actions":[]}';
@@ -198,15 +198,15 @@ Where I found the job / "How did you hear about us": LinkedIn
     }
     return JSON.parse(t.slice(st, t.lastIndexOf('}') + 1));
   };
-  async function claudeJSON(system, user) {
+  async function callGeminiJSON(system, user) {
     const ok = p => p && typeof p === 'object' && Array.isArray(p.actions);
     let raw = '';
-    try { raw = await claude(system, user); const p = parse(raw); if (ok(p)) return p; throw new Error('bad shape'); }
+    try { raw = await callGemini(system, user); const p = parse(raw); if (ok(p)) return p; throw new Error('bad shape'); }
     catch (e) {
       if (/API error/.test(e.message)) throw e;
       log('⚠️ जवाब का JSON ठीक नहीं था, दोबारा माँग रहा हूँ। मिला:', String(raw).slice(0, 200));
       try {
-        raw = await claude(system, user + '\n\nYour last reply was not valid. Reply with ONLY one JSON object of the form {"thought":"...","actions":[...]}.');
+        raw = await callGemini(system, user + '\n\nYour last reply was not valid. Reply with ONLY one JSON object of the form {"thought":"...","actions":[...]}.');
         const p = parse(raw); if (ok(p)) return p;
       } catch (e2) { if (/API error/.test(e2.message)) throw e2; }
       return { thought: 'invalid reply, waiting', actions: [{ do: 'wait' }] };
@@ -660,7 +660,7 @@ Where I found the job / "How did you hear about us": LinkedIn
     }
   }
 
-  // ================= दिमाग: Claude के निर्देश =================
+  // ================= दिमाग: Gemini के निर्देश =================
   const SYSTEM = `You are an autonomous agent that completes job applications on ANY careers/ATS website (Workday, SuccessFactors, Greenhouse, Lever, iCIMS, Taleo, Oracle, custom portals...) inside the candidate's own browser. Each turn you receive the candidate's RESUME and PROFILE, the current page text, visible ERRORS, your HISTORY, and a numbered list of interactive ELEMENTS. Element numbers are valid only for the current turn. Every site is different: read the page, work out what it wants and where "continue" is, and adapt. Never assume a layout.
 You have NO tools. Never write <invoke>, <parameter> or any XML tag. Your whole reply is exactly one JSON object that starts with { and nothing else.
 Output ONLY JSON:
@@ -710,7 +710,7 @@ DATA RULES
 - EXACT VALUES: type PROFILE values exactly as written. Never add or embellish words (no "House No.", "Sector", etc.). Never invent a month, date, language proficiency, grade or any other value that PROFILE/RESUME/TOLD does not give. If a required field needs such a value and it is missing, do ONE combined do=ask listing everything missing (for example the passing months of every education entry, the proficiency level of every language), then reuse the answer everywhere.
 - Required address fields (Address Line 1, City, State, Pin Code) must be filled from PROFILE before clicking Next on a personal-info page. Never skip them.
 - Do not tick "Graduated"/"Completed degree" for professional-exam or school-level entries unless the form has no other way to save them.
-- RESUME-PARSED JUNK: after the resume upload the site auto-creates entries (Unnamed Job Title, Unnamed Licenses, Languages, Skills...). On an education/experience page check EVERY section down to the bottom, including Languages and Skills. Delete garbage entries (Unnamed License...). Fix incomplete ones: an "Unnamed Job Title" experience gets its real title from RESUME (Freelance Data & GST Reporting Analyst / CA Article Assistant), a language needs its proficiency level, an education entry needs its Degree. Do not click Next while any entry shows "Fields to fix" or a red error.
+- RESUME-PARSED JUNK: after the resume upload the site auto-creates entries (Unnamed Job Title, Unnamed Licenses, Languages, Skills...). On an education/experience page check EVERY section down to the bottom, including Languages and Skills. Delete garbage entries (Unnamed License...). Fix incomplete ones: an "Unnamed Job Title" experience gets its real title from RESUME, a language needs its proficiency level, an education entry needs its Degree. Do not click Next while any entry shows "Fields to fix" or a red error.
 - PINCODE / POSTAL CODE: use the pincode from PROFILE. Such fields are often searchable dropdowns: use do=choose with the digits (or type the digits, then click the suggestion). If it says "No results were found", the pincode in PROFILE is wrong: do=ask once, never do=human.
 - ISSUES BANNER: if the page shows "N issues that need to be fixed", "Go to Next Issue" or red field errors after a Submit attempt, click "Go to Next Issue" (or the issue link), fix that field from PROFILE/RESUME/TOLD, and repeat until none are left. Never output do=final while such a banner or errors are visible.
 - PREFILLED VALUES ARE OFTEN WRONG: sites auto-fill fields from the uploaded resume (e.g. City = the state name, or Street Address = the city name). Do NOT assume a non-empty field is correct. For every field that PROFILE covers (name, email, phone, address line 1, city, state, pincode, country), compare the current value with PROFILE and, if different, overwrite it with do=type (for typed fields) or do=choose (for dropdowns). Address line 1 must be EXACTLY the text in PROFILE. City must be the CITY from PROFILE (never a state name). State/Province is a dropdown: choose the state from PROFILE. Pincode must match PROFILE. Do this BEFORE clicking Next on the personal-info page.
@@ -783,7 +783,7 @@ DATA RULES
         `PAGE TEXT: ${pageText()}\n\n${extra}\n\nERRORS VISIBLE ON PAGE: ${JSON.stringify(getErrors())}\n\nNETWORK ERRORS SINCE LAST TURN (HTTP 400+; many are harmless site noise, act only if they match a visible problem such as a failed upload or a section that did not save): ${JSON.stringify(newNet)}\n\nHISTORY (your recent turns, oldest first):\n${JSON.stringify(history.slice(-3))}${warn}\n\nDIAGNOSIS: ${diag || 'none'}\n\nTODAY'S DATE: ${TODAY}\n\nELEMENTS:\n${obs.out.map(e => JSON.stringify(e)).join('\n')}\n\nReply now with ONE JSON object only (it starts with {). No XML, no <invoke> tags.`;
 
       setBar('🤖 पेज पढ़ रहा हूँ और सोच रहा हूँ... (टर्न ' + turn + ')', stopBtn);
-      const plan = await claudeJSON(STATIC, user);
+      const plan = await callGeminiJSON(STATIC, user);
       setBar(null);
       log('🤖', plan.thought, plan.actions);
       if (plan.note) { saveNote(plan.note); log('📝 सीखा:', plan.note); }
